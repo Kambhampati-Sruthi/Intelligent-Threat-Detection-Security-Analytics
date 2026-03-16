@@ -11,6 +11,47 @@ st.set_page_config(layout="wide")
 
 API_URL = "http://127.0.0.1:8000"
 
+# =====================================================
+# COLUMN NORMALIZATION FUNCTION
+# =====================================================
+
+def normalize_logs(df):
+
+    df.columns = df.columns.str.lower()
+
+    # timestamp column
+    if "timestamp" not in df.columns:
+        for col in df.columns:
+            if "time" in col or "date" in col:
+                df = df.rename(columns={col:"timestamp"})
+                break
+
+    # ip column
+    if "ip" not in df.columns:
+        for col in df.columns:
+            if "ip" in col:
+                df = df.rename(columns={col:"ip"})
+                break
+
+    # failed login column
+    if "failed_logins" not in df.columns:
+        for col in df.columns:
+            if "fail" in col or "attempt" in col:
+                df = df.rename(columns={col:"failed_logins"})
+                break
+
+    # fallback values
+    if "timestamp" not in df.columns:
+        df["timestamp"] = pd.date_range(start="2024-01-01", periods=len(df))
+
+    if "ip" not in df.columns:
+        df["ip"] = "unknown"
+
+    if "failed_logins" not in df.columns:
+        df["failed_logins"] = np.random.randint(0,5,len(df))
+
+    return df
+
 # ===============================
 # DARK CYBER THEME
 # ===============================
@@ -36,28 +77,15 @@ p,label{
 color:white !important;
 }
 
-div[data-baseweb="select"] span{
-color:black !important;
-}
-
 .stButton>button{
 background:linear-gradient(90deg,#00ffff,#0055ff);
 color:white;
 border-radius:8px;
-padding:10px 20px;
 }
 
 .stDownloadButton>button{
 background:linear-gradient(90deg,#00ffff,#0077ff);
 color:white;
-font-weight:bold;
-border-radius:8px;
-padding:10px 20px;
-}
-
-.plotly .xtick text,
-.plotly .ytick text{
-fill:white !important;
 }
 
 </style>
@@ -68,7 +96,7 @@ fill:white !important;
 # ===============================
 
 st.markdown("<h1>Intelligent Threat Detection & Security Analytics</h1>", unsafe_allow_html=True)
-st.caption("AI Powered Cyber Threat Monitoring Dashboard")
+#st.caption("AI Powered Cyber Threat Monitoring Dashboard")
 
 # ===============================
 # BACKEND CHECK
@@ -103,21 +131,23 @@ with tabs[0]:
 
     option = st.radio(
         "Select Log Source",
-        ["Upload Logs", "Use Sample Dataset"]
+        ["Upload Logs","Use Sample Dataset"]
     )
 
-    df = None
+    df=None
 
-    # Upload logs
-    if option == "Upload Logs":
+    # upload logs
+    if option=="Upload Logs":
 
         uploaded = st.file_uploader("Upload CSV Logs")
 
         if uploaded:
-            df = pd.read_csv(uploaded)
 
-    # Sample dataset
-    if option == "Use Sample Dataset":
+            df = pd.read_csv(uploaded)
+            df = normalize_logs(df)
+
+    # sample datasets
+    if option=="Use Sample Dataset":
 
         dataset = st.selectbox(
             "Choose Dataset",
@@ -128,6 +158,7 @@ with tabs[0]:
 
             try:
                 df = pd.read_csv(f"data/{dataset}")
+                df = normalize_logs(df)
                 st.success(f"{dataset} loaded successfully")
             except:
                 st.error("Dataset not found")
@@ -140,23 +171,21 @@ with tabs[0]:
 
         st.dataframe(df)
 
-        # Backend Analysis
-        anomalies = pd.DataFrame()
+        anomalies=pd.DataFrame()
 
+        # backend analysis
         try:
 
             csv_buffer = io.StringIO()
-            df.to_csv(csv_buffer, index=False)
+            df.to_csv(csv_buffer,index=False)
 
-            files = {
-                "file": ("logs.csv", csv_buffer.getvalue(), "text/csv")
-            }
+            files={"file":("logs.csv",csv_buffer.getvalue(),"text/csv")}
 
-            res = requests.post(f"{API_URL}/analyze", files=files)
+            res=requests.post(f"{API_URL}/analyze",files=files)
 
-            if res.status_code == 200:
-                result = res.json()
-                anomalies = pd.DataFrame(result.get("alerts", []))
+            if res.status_code==200:
+                result=res.json()
+                anomalies=pd.DataFrame(result.get("alerts",[]))
 
         except:
             st.warning("Backend analysis unavailable")
@@ -165,17 +194,17 @@ with tabs[0]:
         # METRICS
         # ===============================
 
-        active_threats = len(anomalies)
+        active_threats=len(anomalies)
 
         try:
-            blocked = requests.get(f"{API_URL}/blocked-ips").json()
-            blocked_attacks = len(blocked)
+            blocked=requests.get(f"{API_URL}/blocked-ips").json()
+            blocked_attacks=len(blocked)
         except:
-            blocked_attacks = 0
+            blocked_attacks=0
 
-        security_score = max(100 - active_threats*5, 50)
+        security_score=max(100-active_threats*5,50)
 
-        c1,c2,c3 = st.columns(3)
+        c1,c2,c3=st.columns(3)
 
         c1.metric("Active Threats",active_threats)
         c2.metric("Blocked Attacks",blocked_attacks)
@@ -187,7 +216,7 @@ with tabs[0]:
 
         st.markdown("### Login Failure Trend")
 
-        fig = px.line(
+        fig=px.line(
             df,
             x="timestamp",
             y="failed_logins",
@@ -208,12 +237,15 @@ with tabs[0]:
 
         st.markdown("### AI Anomaly Detection")
 
-        suspicious = df[df["failed_logins"]>10].copy()
+        suspicious=df[df["failed_logins"]>10]
 
         if len(suspicious)>0:
+
             st.error("Suspicious login activity detected")
             st.dataframe(suspicious)
+
         else:
+
             st.success("No anomalies detected")
 
         # ===============================
@@ -222,7 +254,7 @@ with tabs[0]:
 
         st.markdown("### Top Attacker IPs")
 
-        top_attackers = (
+        top_attackers=(
             df.groupby("ip")["failed_logins"]
             .sum()
             .sort_values(ascending=False)
@@ -230,7 +262,7 @@ with tabs[0]:
             .reset_index()
         )
 
-        fig = px.bar(top_attackers,x="ip",y="failed_logins")
+        fig=px.bar(top_attackers,x="ip",y="failed_logins")
 
         fig.update_layout(
             paper_bgcolor="black",
@@ -246,10 +278,10 @@ with tabs[0]:
 
         st.markdown("### Threat Activity Heatmap")
 
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["hour"] = df["timestamp"].dt.hour
+        df["timestamp"]=pd.to_datetime(df["timestamp"])
+        df["hour"]=df["timestamp"].dt.hour
 
-        heatmap_data = df.pivot_table(
+        heatmap_data=df.pivot_table(
             values="failed_logins",
             index="hour",
             columns="ip",
@@ -257,7 +289,7 @@ with tabs[0]:
             fill_value=0
         )
 
-        fig = px.imshow(heatmap_data)
+        fig=px.imshow(heatmap_data)
 
         fig.update_layout(
             paper_bgcolor="black",
@@ -272,11 +304,11 @@ with tabs[0]:
 
         st.markdown("### Attack Timeline")
 
-        timeline_df = df[df["failed_logins"]>10]
+        timeline_df=df[df["failed_logins"]>10]
 
         if len(timeline_df)>0:
 
-            fig = px.scatter(
+            fig=px.scatter(
                 timeline_df,
                 x="timestamp",
                 y="ip",
@@ -306,7 +338,7 @@ with tabs[0]:
             suspicious["lat"]=np.random.uniform(-60,60,len(suspicious))
             suspicious["lon"]=np.random.uniform(-180,180,len(suspicious))
 
-            fig = px.scatter_geo(
+            fig=px.scatter_geo(
                 suspicious,
                 lat="lat",
                 lon="lon",
@@ -338,7 +370,7 @@ with tabs[0]:
 
         st.markdown("### Real-Time Attack Monitoring")
 
-        realtime = pd.DataFrame({
+        realtime=pd.DataFrame({
             "time":range(30),
             "attacks":np.random.randint(0,20,30)
         })
@@ -351,10 +383,10 @@ with tabs[0]:
 
         st.markdown("### Download Security Report")
 
-        report_df = df.copy()
-        report_df["report_generated"] = datetime.now()
+        report_df=df.copy()
+        report_df["report_generated"]=datetime.now()
 
-        csv = report_df.to_csv(index=False)
+        csv=report_df.to_csv(index=False)
 
         st.download_button(
             label="Download Log Report",
@@ -416,7 +448,6 @@ with tabs[3]:
     if st.button("Scan Dark Web"):
 
         if email=="":
-
             st.warning("Enter email first")
 
         else:
@@ -482,5 +513,4 @@ Protection:
 """)
 
         else:
-
             st.write("Searching cybersecurity knowledge base...")
