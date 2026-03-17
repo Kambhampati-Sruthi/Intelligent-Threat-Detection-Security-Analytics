@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import io
 
@@ -12,66 +13,87 @@ app = FastAPI(
 )
 
 # ------------------------------------------------
-# HEALTH CHECK
+# ✅ CORS (REQUIRED for Streamlit connection)
 # ------------------------------------------------
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # allow all (important for deployment)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ------------------------------------------------
+# ✅ ROOT + HEALTH CHECK
+# ------------------------------------------------
+
+@app.get("/")
+def root():
+    return {"message": "SentinelAI Backend Running"}
 
 @app.get("/health")
 def health():
-    return {"status": "SentinelAI Backend Running"}
+    return {"status": "OK"}
 
 # ------------------------------------------------
-# LOG ANALYSIS (MAIN AI DETECTION)
+# 🔥 LOG ANALYSIS (MAIN AI DETECTION)
 # ------------------------------------------------
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        df = pd.read_csv(io.StringIO(content.decode()))
 
-    content = await file.read()
+        # ✅ Safety: handle missing columns
+        required_cols = ["ip", "failed_logins"]
 
-    df = pd.read_csv(io.StringIO(content.decode()))
+        for col in required_cols:
+            if col not in df.columns:
+                return {"error": f"Missing column: {col}"}
 
-    alerts = []
+        alerts = []
 
-    for index, row in df.iterrows():
+        for _, row in df.iterrows():
+            status = predict_attack(row["failed_logins"])
 
-        status = predict_attack(row["failed_logins"])
+            if status != "NORMAL":
+                alert = {
+                    "ip": str(row["ip"]),
+                    "failed_logins": int(row["failed_logins"]),
+                    "status": status
+                }
 
-        if status != "NORMAL":
+                alerts.append(alert)
 
-            alert = {
-                "ip": row["ip"],
-                "failed_logins": int(row["failed_logins"]),
-                "status": status
-            }
+                if status == "HIGH RISK ATTACK":
+                    block_ip(row["ip"])
 
-            alerts.append(alert)
+        return {
+            "total_logs": len(df),
+            "alerts": alerts
+        }
 
-            if status == "HIGH RISK ATTACK":
-                block_ip(row["ip"])
-
-    return {
-        "total_logs": len(df),
-        "alerts": alerts
-    }
+    except Exception as e:
+        return {"error": str(e)}
 
 # ------------------------------------------------
-# BLOCKED IPS
+# 🔐 BLOCKED IPS
 # ------------------------------------------------
 
 @app.get("/blocked-ips")
 def get_blocked():
-
     return {
         "blocked_ips": blocked_ips
     }
 
 # ------------------------------------------------
-# THREAT INTELLIGENCE FEED
+# 🌐 THREAT INTELLIGENCE
 # ------------------------------------------------
 
 @app.get("/threat-feed")
 def threat_feed():
-
     return [
         {"threat": "Brute Force Attack", "severity": "High"},
         {"threat": "Phishing Campaign", "severity": "Medium"},
@@ -81,14 +103,12 @@ def threat_feed():
     ]
 
 # ------------------------------------------------
-# DARK WEB CHECK (SIMULATED)
+# 🕵 DARK WEB CHECK
 # ------------------------------------------------
 
 @app.get("/darkweb-check")
 def darkweb(email: str):
-
     if "test" in email.lower():
-
         return {
             "email": email,
             "status": "leaked",
