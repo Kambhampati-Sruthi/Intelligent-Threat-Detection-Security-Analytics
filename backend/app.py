@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import io
 
-from backend.attack_predictor import predict_attack
-from backend.ip_blocker import block_ip, blocked_ips
+# ✅ FIXED IMPORTS (IMPORTANT)
+from attack_predictor import predict_attack
+from ip_blocker import block_ip, blocked_ips
 
 app = FastAPI(
     title="SentinelAI Security Engine",
@@ -13,12 +14,12 @@ app = FastAPI(
 )
 
 # ------------------------------------------------
-# ✅ CORS (REQUIRED for Streamlit connection)
+# ✅ CORS (FOR STREAMLIT CONNECTION)
 # ------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # allow all (important for deployment)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,28 +38,57 @@ def health():
     return {"status": "OK"}
 
 # ------------------------------------------------
-# 🔥 LOG ANALYSIS (MAIN AI DETECTION)
+# 🔧 DATA NORMALIZATION (VERY IMPORTANT)
+# ------------------------------------------------
+
+def normalize_df(df):
+
+    df.columns = df.columns.str.lower()
+
+    # auto-detect columns
+    if "ip" not in df.columns:
+        for col in df.columns:
+            if "ip" in col:
+                df.rename(columns={col: "ip"}, inplace=True)
+
+    if "failed_logins" not in df.columns:
+        for col in df.columns:
+            if "fail" in col or "attempt" in col:
+                df.rename(columns={col: "failed_logins"}, inplace=True)
+
+    # fallback values
+    if "ip" not in df.columns:
+        df["ip"] = "unknown"
+
+    if "failed_logins" not in df.columns:
+        df["failed_logins"] = 0
+
+    # type conversion
+    df["failed_logins"] = pd.to_numeric(df["failed_logins"], errors="coerce").fillna(0)
+
+    return df
+
+# ------------------------------------------------
+# 🔥 LOG ANALYSIS (MAIN AI ENGINE)
 # ------------------------------------------------
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
+
     try:
         content = await file.read()
         df = pd.read_csv(io.StringIO(content.decode()))
 
-        # ✅ Safety: handle missing columns
-        required_cols = ["ip", "failed_logins"]
-
-        for col in required_cols:
-            if col not in df.columns:
-                return {"error": f"Missing column: {col}"}
+        df = normalize_df(df)
 
         alerts = []
 
         for _, row in df.iterrows():
+
             status = predict_attack(row["failed_logins"])
 
             if status != "NORMAL":
+
                 alert = {
                     "ip": str(row["ip"]),
                     "failed_logins": int(row["failed_logins"]),
@@ -71,12 +101,17 @@ async def analyze(file: UploadFile = File(...)):
                     block_ip(row["ip"])
 
         return {
+            "success": True,
             "total_logs": len(df),
             "alerts": alerts
         }
 
     except Exception as e:
-        return {"error": str(e)}
+
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # ------------------------------------------------
 # 🔐 BLOCKED IPS
@@ -108,6 +143,7 @@ def threat_feed():
 
 @app.get("/darkweb-check")
 def darkweb(email: str):
+
     if "test" in email.lower():
         return {
             "email": email,
