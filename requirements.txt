@@ -5,3 +5,5 @@ numpy
 scikit-learn
 networkx
 requests
+plotly
+python-multipart
